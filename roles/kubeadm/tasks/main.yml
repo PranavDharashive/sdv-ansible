@@ -1,0 +1,142 @@
+---
+- name: Load kernel modules
+  ansible.builtin.copy:
+    content: |
+      overlay
+      br_netfilter
+    dest: /etc/modules-load.d/containerd.conf
+    mode: '0644'
+
+- name: Apply kernel modules
+  ansible.builtin.command: modprobe {{ item }}
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Configure sysctl for Kubernetes
+  ansible.builtin.copy:
+    content: |
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.bridge.bridge-nf-call-iptables = 1
+      net.ipv4.ip_forward = 1
+    dest: /etc/sysctl.d/kubernetes.conf
+    mode: '0644'
+
+- name: Apply sysctl parameters
+  ansible.builtin.command: sysctl --system
+
+- name: Add Docker GPG key
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    keyring: /etc/apt/keyrings/docker.gpg
+    state: present
+
+- name: Add Docker APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ ansible_architecture }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install containerd.io
+  ansible.builtin.apt:
+    name: containerd.io
+    state: present
+
+- name: Configure containerd to use systemd cgroup driver
+  ansible.builtin.command: containerd config default
+  register: containerd_config_default
+  changed_when: false
+
+- name: Save containerd config
+  ansible.builtin.copy:
+    content: "{{ containerd_config_default.stdout | replace('SystemdCgroup = false', 'SystemdCgroup = true') }}"
+    dest: /etc/containerd/config.toml
+    mode: '0644'
+  notify: Restart containerd
+
+- name: Install Docker
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - docker-compose-plugin
+    state: present
+
+- name: Configure Docker to use systemd cgroup driver
+  ansible.builtin.copy:
+    content: |
+      {
+        "exec-opts": ["native.cgroupdriver=systemd"],
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "100m"
+        },
+        "storage-driver": "overlay2"
+      }
+    dest: /etc/docker/daemon.json
+    mode: '0644'
+  notify: Restart docker
+
+- name: Add Kubernetes GPG key
+  ansible.builtin.apt_key:
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/Release.key"
+    keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    state: present
+
+- name: Add Kubernetes APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_version }}/deb/ /"
+    state: present
+
+- name: Install Kubernetes components
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+    update_cache: yes
+
+- name: Hold Kubernetes packages
+  ansible.builtin.command: apt-mark hold kubelet kubeadm kubectl
+
+- name: Initialize the Kubernetes cluster
+  ansible.builtin.command: >
+    kubeadm init
+    --pod-network-cidr=10.244.0.0/16
+    --apiserver-advertise-address={{ kube_api_server_ip }}
+  args:
+    creates: /etc/kubernetes/admin.conf
+
+- name: Configure kubeconfig for the current user
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: '0755'
+
+- name: Copy admin.conf to user's kubeconfig
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_env.USER }}"
+    group: "{{ ansible_env.USER }}"
+    mode: '0644'
+
+- name: Install Calico CNI (tigera-operator.yaml)
+  ansible.builtin.command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/tigera-operator.yaml
+  args:
+    creates: /etc/kubernetes/manifests/calico-kube-controllers.yaml # A file created by Calico operator
+
+- name: Install Calico CNI (custom-resources.yaml)
+  ansible.builtin.command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/custom-resources.yaml
+  args:
+    creates: /etc/kubernetes/manifests/calico-node.yaml # A file created by Calico operator
+
+- name: Remove control-plane taint
+  ansible.builtin.command: kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+  register: taint_result
+  changed_when: "'taint \"node-role.kubernetes.io/control-plane\" successfully removed' in taint_result.stdout"
+  failed_when: "'error' in taint_result.stderr and 'not found' not in taint_result.stderr"
+
+- name: Handlers for service restarts
+  ansible.builtin.meta: flush_handlers

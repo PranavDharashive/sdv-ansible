@@ -1,0 +1,12 @@
+---
+- hosts: all
+  become: yes
+  
+  roles:
+    - common
+    - kubeadm
+    - monitoring
+    - redis
+    - mysql
+    - sdv_apps
+    - minio

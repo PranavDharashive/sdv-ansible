@@ -1,0 +1,75 @@
+---
+- name: Reset Kubernetes cluster
+  ansible.builtin.command: kubeadm reset --force
+  ignore_errors: yes
+
+- name: Unhold Kubernetes packages
+  ansible.builtin.command: apt-mark unhold kubelet kubeadm kubectl
+  ignore_errors: yes
+
+- name: Remove Kubernetes packages
+  ansible.builtin.apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: absent
+    autoremove: yes
+  ignore_errors: yes
+
+- name: Remove Docker and containerd packages
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: absent
+    autoremove: yes
+  ignore_errors: yes
+
+- name: Stop and disable node_exporter service
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: stopped
+    enabled: no
+  ignore_errors: yes
+
+- name: Remove node_exporter files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/node_exporter.service
+    - /usr/local/bin/node_exporter
+  ignore_errors: yes
+
+- name: Remove node_exporter user
+  ansible.builtin.user:
+    name: node_exporter
+    state: absent
+    remove: yes
+  ignore_errors: yes
+
+- name: Remove Kubernetes related directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/kubernetes
+    - "{{ ansible_env.HOME }}/.kube"
+    - /var/lib/etcd
+    - /etc/containerd
+    - /etc/cni
+    - /var/lib/docker
+    - /etc/docker
+  ignore_errors: yes
+
+- name: Flush iptables rules
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - iptables -F
+    - iptables -t nat -F
+    - iptables -t mangle -F
+    - iptables -X
+  ignore_errors: yes

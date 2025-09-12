@@ -1,0 +1,115 @@
+---
+- name: Create /mnt/minio-storage/ directory
+  ansible.builtin.file:
+    path: /mnt/minio-storage/
+    state: directory
+    mode: '0755'
+
+- name: Create minio namespace
+  kubernetes.core.k8s:
+    name: minio
+    api_version: v1
+    kind: Namespace
+    state: present
+
+- name: Deploy MinIO with local volume
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: minio-pv-volume
+        labels:
+          type: local
+      spec:
+        storageClassName: sdv-local-storage # Reusing the storage class
+        capacity:
+          storage: 10Gi
+        accessModes:
+          - ReadWriteOnce
+        hostPath:
+          path: "/mnt/minio-storage"
+        nodeAffinity:
+          required:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - {{ ansible_hostname }}
+      ---
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: minio-pv-claim
+        namespace: minio
+      spec:
+        storageClassName: sdv-local-storage
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: minio
+        namespace: minio
+      spec:
+        selector:
+          matchLabels:
+            app: minio
+        strategy:
+          type: Recreate
+        template:
+          metadata:
+            labels:
+              app: minio
+          spec:
+            containers:
+            - name: minio
+              image: minio/minio:latest
+              args:
+              - server
+              - /data
+              env:
+              - name: MINIO_ROOT_USER
+                value: minioadmin
+              - name: MINIO_ROOT_PASSWORD
+                value: minioadmin
+              ports:
+              - containerPort: 9000
+              volumeMounts:
+              - name: minio-persistent-storage
+                mountPath: /data
+            volumes:
+            - name: minio-persistent-storage
+              persistentVolumeClaim:
+                claimName: minio-pv-claim
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: minio-service
+        namespace: minio
+      spec:
+        selector:
+          app: minio
+        ports:
+          - protocol: TCP
+            port: 9000
+            targetPort: 9000
+
+- name: Verify MinIO pod is running
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: minio
+    label_selectors:
+      - app=minio
+  register: minio_pods
+  until: minio_pods.resources | length > 0 and minio_pods.resources[0].status.containerStatuses[0].ready
+  retries: 30
+  delay: 10

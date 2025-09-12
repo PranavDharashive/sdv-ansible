@@ -1,0 +1,26 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Install common packages
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+
+- name: Disable swap
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptoggled.changed is defined and ansible_swaptoggled.changed
+  changed_when: false # This command doesn't change anything if swap is already off
+
+- name: Comment out swap in /etc/fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\s*)([^#]+\s+swap\s+.*)$'
+    replace: '\1#\2'
+    backup: yes

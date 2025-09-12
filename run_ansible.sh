@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# This script sets up Ansible on the remote host, downloads the SDV Ansible project,
+# and executes the setup playbook locally.
+
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG_FILE="sdv_ansible_run_${TIMESTAMP}.log"
+exec &> >(tee -a "$LOG_FILE")
+
+echo "Starting SDV Ansible setup on the local machine..."
+
+# 1. Install Ansible and its dependencies
+echo "Installing Ansible and its dependencies..."
+sudo apt-get update
+sudo apt-get install -y software-properties-common
+sudo add-apt-repository --yes --update ppa:ansible/ansible
+sudo apt-get install -y ansible python3-pip
+
+# Install kubernetes collection for Ansible
+pip3 install kubernetes openshift
+ansible-galaxy collection install kubernetes.core
+
+# 2. Download the Ansible project
+echo "Downloading the SDV Ansible project..."
+# In a real scenario, this would involve `git clone` or `wget` a tarball.
+# For this demonstration, we assume the project files are already present in the current directory.
+
+# 3. Execute the site.yml playbook locally
+echo "Executing the setup playbook..."
+# Pass variables from interactive prompts to Ansible
+read -p "Enter the private IP address of the Kube-apiserver endpoint: " KUBE_API_SERVER_IP
+DEFAULT_K8S_VERSION="1.31"
+read -p "Enter the Kubernetes version to install (default: ${DEFAULT_K8S_VERSION}, e.g., 1.30, 1.29): " KUBERNETES_VERSION
+KUBERNETES_VERSION=${KUBERNETES_VERSION:-$DEFAULT_K8S_VERSION}
+
+ansible-playbook site.yml -c local \
+  -e "kube_api_server_ip=$KUBE_API_SERVER_IP" \
+  -e "kubernetes_version=$KUBERNETES_VERSION"
+
+echo "SDV Ansible setup completed. Check $LOG_FILE for details."

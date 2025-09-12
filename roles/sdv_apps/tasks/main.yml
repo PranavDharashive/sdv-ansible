@@ -1,0 +1,102 @@
+---
+- name: Deploy SDV application
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: sdv-app
+        namespace: sdv
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: sdv-app
+        template:
+          metadata:
+            labels:
+              app: sdv-app
+          spec:
+            containers:
+            - name: sdv-app
+              image: nginx:latest
+              ports:
+              - containerPort: 80
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: sdv-app-service
+        namespace: sdv
+      spec:
+        selector:
+          app: sdv-app
+        ports:
+          - protocol: TCP
+            port: 80
+            targetPort: 80
+
+- name: Verify SDV app pod is running
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: sdv
+    label_selectors:
+      - app=sdv-app
+  register: sdv_app_pods
+  until: sdv_app_pods.resources | length > 0 and sdv_app_pods.resources[0].status.containerStatuses[0].ready
+  retries: 30
+  delay: 10
+
+- name: Deploy SDV Nginx/Frontend application
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: sdv-nginx-frontend
+        namespace: sdv
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: sdv-nginx-frontend
+        template:
+          metadata:
+            labels:
+              app: sdv-nginx-frontend
+          spec:
+            containers:
+            - name: sdv-nginx-frontend
+              image: nginx:latest
+              ports:
+              - containerPort: 80
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: sdv-nginx-frontend-service
+        namespace: sdv
+      spec:
+        selector:
+          app: sdv-nginx-frontend
+        type: NodePort
+        ports:
+          - protocol: TCP
+            port: 80
+            targetPort: 80
+            nodePort: 30080 # Example NodePort
+
+- name: Verify SDV Nginx/Frontend app pod is running
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: sdv
+    label_selectors:
+      - app=sdv-nginx-frontend
+  register: sdv_nginx_frontend_pods
+  until: sdv_nginx_frontend_pods.resources | length > 0 and sdv_nginx_frontend_pods.resources[0].status.containerStatuses[0].ready
+  retries: 30
+  delay: 10

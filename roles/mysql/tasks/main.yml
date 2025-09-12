@@ -1,0 +1,141 @@
+---
+- name: Create /mnt/mysql-db-data/ directory
+  ansible.builtin.file:
+    path: /mnt/mysql-db-data/
+    state: directory
+    mode: '0755'
+
+- name: Create local storage class
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: sdv-local-storage
+      provisioner: kubernetes.io/no-provisioner
+      volumeBindingMode: WaitForFirstConsumer
+
+- name: Deploy MySQL with PV and PVC
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: mysql-pv-volume
+        labels:
+          type: local
+      spec:
+        storageClassName: sdv-local-storage
+        capacity:
+          storage: 5Gi
+        accessModes:
+          - ReadWriteOnce
+        hostPath:
+          path: "/mnt/mysql-db-data"
+        nodeAffinity:
+          required:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - {{ ansible_hostname }}
+      ---
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: mysql-pv-claim
+        namespace: sdv
+      spec:
+        storageClassName: sdv-local-storage
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mysql
+        namespace: sdv
+      spec:
+        selector:
+          matchLabels:
+            app: mysql
+        strategy:
+          type: Recreate
+        template:
+          metadata:
+            labels:
+              app: mysql
+          spec:
+            containers:
+            - name: mysql
+              image: mysql:5.7
+              env:
+              - name: MYSQL_ROOT_PASSWORD
+                value: abcd1234
+              - name: MYSQL_DATABASE
+                value: sdv_data
+              - name: MYSQL_USER
+                value: sdvuser
+              - name: MYSQL_PASSWORD
+                value: abcd1234
+              ports:
+              - containerPort: 3306
+                name: mysql
+              volumeMounts:
+              - name: mysql-persistent-storage
+                mountPath: /var/lib/mysql
+            volumes:
+            - name: mysql-persistent-storage
+              persistentVolumeClaim:
+                claimName: mysql-pv-claim
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: mysql-service
+        namespace: sdv
+      spec:
+        ports:
+        - port: 3306
+        selector:
+          app: mysql
+        clusterIP: None
+
+- name: Wait for MySQL pod to be ready
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: sdv
+    label_selectors:
+      - app=mysql
+  register: mysql_pods
+  until: mysql_pods.resources | length > 0 and mysql_pods.resources[0].status.containerStatuses[0].ready
+  retries: 30
+  delay: 10
+
+- name: Configure MySQL database
+  ansible.builtin.command: >
+    kubectl exec -i {{ mysql_pods.resources[0].metadata.name }} -n sdv -- mysql -u root -pabcd1234 <<EOF
+    CREATE DATABASE IF NOT EXISTS sdv_data;
+    CREATE USER 'sdvuser'@'%' IDENTIFIED BY 'abcd1234';
+    GRANT ALL PRIVILEGES ON sdv_data.* TO 'sdvuser'@'%';
+    FLUSH PRIVILEGES;
+    EOF
+  changed_when: false # This command is idempotent
+
+- name: Verify MySQL service
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Service
+    namespace: sdv
+    name: mysql-service
+  register: mysql_service_info
+  until: mysql_service_info.resources | length > 0
+  retries: 10
+  delay: 5
