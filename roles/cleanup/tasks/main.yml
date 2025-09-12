@@ -28,14 +28,17 @@
     autoremove: yes
   ignore_errors: yes
 
-- name: Remove Docker APT repository files
+- name: Remove APT repository files and keys
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
     - /etc/apt/sources.list.d/docker.list
+    - /etc/apt/sources.list.d/kubernetes.list
     - /etc/apt/keyrings/docker.gpg
     - /etc/apt/keyrings/docker.asc
+    - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    - /etc/apt/keyrings/kubernetes-apt-keyring.gpg~
   ignore_errors: yes
 
 - name: Stop and disable node_exporter service

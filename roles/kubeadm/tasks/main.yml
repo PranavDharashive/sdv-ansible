@@ -1,4 +1,3 @@
----
 - name: Load kernel modules
   ansible.builtin.copy:
     content: |
@@ -25,51 +24,51 @@
 - name: Apply sysctl parameters
   ansible.builtin.command: sysctl --system
 
-- name: Remove old Docker apt repository file if it exists
-  ansible.builtin.file:
-    path: /etc/apt/sources.list.d/docker.list
-    state: absent
-
-- name: Remove old Docker GPG key if it exists
-  ansible.builtin.file:
-    path: /etc/apt/keyrings/docker.gpg
-    state: absent
-
-- name: Update apt package index
+- name: Install prerequisite packages
   ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
     update_cache: yes
 
-- name: Create /etc/apt/keyrings directory
+- name: Create directory for Docker GPG key
   ansible.builtin.file:
-    path: /etc/apt/keyrings
+    path: /usr/share/keyrings
     state: directory
     mode: '0755'
 
 - name: Add Docker GPG key
-  ansible.builtin.shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  ansible.builtin.shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/docker-archive-keyring.gpg
 
-- name: Set permissions on Docker GPG key
-  ansible.builtin.file:
-    path: /etc/apt/keyrings/docker.asc
-    mode: 'a+r'
+- name: Add Docker APT repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+    filename: docker
 
-- name: Add Docker apt repository
-  ansible.builtin.shell: echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-- name: Install Docker packages
+- name: Install Docker and containerd
   ansible.builtin.apt:
-    name: "{{ item }}"
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
     state: present
     update_cache: yes
-  loop:
-    - docker-ce
-    - docker-ce-cli
-    - containerd.io
+  notify:
+    - Enable Docker
+    - Start Docker
 
-- name: Create docker daemon config directory
+- name: Create Docker config directory
   ansible.builtin.file:
     path: /etc/docker
     state: directory
+    mode: '0755'
 
 - name: Configure Docker to use systemd cgroup driver
   ansible.builtin.copy:
@@ -85,22 +84,32 @@
       }
   notify: Restart docker
 
-- name: Remove default containerd config file
+- name: Create containerd directory
   ansible.builtin.file:
-    path: /etc/containerd/config.toml
-    state: absent
-
-- name: Create containerd config directory for CRI
-  ansible.builtin.file:
-    path: /etc/containerd/conf.d
+    path: /etc/containerd
     state: directory
 
-- name: Configure containerd CRI plugin
+- name: Generate containerd default config
+  ansible.builtin.command: containerd config default
+  register: containerd_config_default
+  changed_when: false
+
+- name: Check if containerd config exists
+  ansible.builtin.stat:
+    path: /etc/containerd/config.toml
+  register: containerd_config_stat
+
+- name: Save containerd config
   ansible.builtin.copy:
-    dest: /etc/containerd/conf.d/10-criconfig.conf
-    content: |
-      [plugins."io.containerd.grpc.v1.cri"]
-        systemd_cgroup = true
+    content: "{{ containerd_config_default.stdout }}"
+    dest: /etc/containerd/config.toml
+  when: not containerd_config_stat.stat.exists
+
+- name: Configure containerd to use systemd cgroup driver
+  ansible.builtin.lineinfile:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    line: 'SystemdCgroup = true'
   notify: Restart containerd
 
 - name: Add Kubernetes GPG key
@@ -131,6 +140,7 @@
     kubeadm init
     --pod-network-cidr=10.244.0.0/16
     --apiserver-advertise-address={{ kube_api_server_ip }}
+    --cri-socket=unix:///run/containerd/containerd.sock
   args:
     creates: /etc/kubernetes/admin.conf
 
@@ -149,15 +159,10 @@
     group: "{{ ansible_env.USER }}"
     mode: '0644'
 
-- name: Install Calico CNI (tigera-operator.yaml)
-  ansible.builtin.command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/tigera-operator.yaml
+- name: Install Calico CNI
+  ansible.builtin.command: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
   args:
     creates: /etc/kubernetes/manifests/calico-kube-controllers.yaml # A file created by Calico operator
-
-- name: Install Calico CNI (custom-resources.yaml)
-  ansible.builtin.command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/custom-resources.yaml
-  args:
-    creates: /etc/kubernetes/manifests/calico-node.yaml # A file created by Calico operator
 
 - name: Remove control-plane taint
   ansible.builtin.command: kubectl taint nodes --all node-role.kubernetes.io/control-plane-

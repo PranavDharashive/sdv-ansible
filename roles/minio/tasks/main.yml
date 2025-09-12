@@ -118,6 +118,6 @@
     label_selectors:
       - app=minio
   register: minio_pods
-  until: minio_pods.resources | length > 0 and minio_pods.resources[0].status.containerStatuses[0].ready
+  until: minio_pods.resources | length > 0 and minio_pods.resources[0].status.containerStatuses is defined and minio_pods.resources[0].status.containerStatuses[0].ready
   retries: 30
   delay: 10

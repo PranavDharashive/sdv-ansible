@@ -6,9 +6,9 @@
     - common
     - kubeadm
     - haproxy
-    - minio
-    - mysql
-    - redis
-    - sdv_middleware
-    - sdv_apps
-    - monitoring
+    # - minio
+    # - mysql
+    # - redis
+    # - sdv_middleware
+    # - sdv_apps
+    # - monitoring
