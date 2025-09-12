@@ -25,6 +25,16 @@
 - name: Apply sysctl parameters
   ansible.builtin.command: sysctl --system
 
+- name: Remove old Docker apt repository file if it exists
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/docker.list
+    state: absent
+
+- name: Remove old Docker GPG key if it exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/docker.gpg
+    state: absent
+
 - name: Update apt package index
   ansible.builtin.apt:
     update_cache: yes
