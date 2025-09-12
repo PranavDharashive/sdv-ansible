@@ -1,0 +1,51 @@
+---
+- name: Deploy SDV Middleware application
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: sdv-middleware
+        namespace: sdv
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: sdv-middleware
+        template:
+          metadata:
+            labels:
+              app: sdv-middleware
+          spec:
+            containers:
+            - name: sdv-middleware
+              image: nginx:latest # Assuming nginx:latest as no specific image was provided
+              ports:
+              - containerPort: 80
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: sdv-middleware-service
+        namespace: sdv
+      spec:
+        selector:
+          app: sdv-middleware
+        ports:
+          - protocol: TCP
+            port: 80
+            targetPort: 80
+        type: ClusterIP
+
+- name: Verify SDV Middleware pod is running
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: sdv
+    label_selectors:
+      - app=sdv-middleware
+  register: sdv_middleware_pods
+  until: sdv_middleware_pods.resources | length > 0 and sdv_middleware_pods.resources[0].status.containerStatuses[0].ready
+  retries: 30
+  delay: 10

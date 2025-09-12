@@ -103,7 +103,7 @@
             protocol: TCP
             port: 9000
             targetPort: 9000
-            nodePort: 30090
+            nodePort: 30009 # Changed from 30090 to 30009
           - name: console
             protocol: TCP
             port: 9001

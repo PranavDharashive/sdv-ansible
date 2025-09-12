@@ -57,7 +57,7 @@
       backend minio_backend
           mode http
           balance roundrobin
-          server minio_server {{ ansible_default_ipv4.address }}:30090 check
+          server minio_server {{ ansible_default_ipv4.address }}:30009 check
 
       backend grafana_backend
           mode http

@@ -5,9 +5,10 @@
   roles:
     - common
     - kubeadm
-    - monitoring
-    - redis
-    - mysql
-    - sdv_apps
-    - minio
     - haproxy
+    - minio
+    - mysql
+    - redis
+    - sdv_middleware
+    - sdv_apps
+    - monitoring
