@@ -68,7 +68,7 @@
         selector:
           app.kubernetes.io/name: node-exporter
       type: ClusterIP
----
+      ---
       apiVersion: v1
       kind: Endpoints
       metadata:

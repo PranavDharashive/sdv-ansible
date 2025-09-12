@@ -7,6 +7,16 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="sdv_ansible_run_${TIMESTAMP}.log"
 exec &> >(tee -a "$LOG_FILE")
 
+# Pass variables from interactive prompts to Ansible
+read -p "Enter the private IP address of the Kube-apiserver endpoint: " KUBE_API_SERVER_IP < /dev/tty
+if [ -z "$KUBE_API_SERVER_IP" ]; then
+    echo "Kube-apiserver endpoint cannot be empty." >&2
+    exit 1
+fi
+DEFAULT_K8S_VERSION="1.31"
+read -p "Enter the Kubernetes version to install (default: ${DEFAULT_K8S_VERSION}, e.g., 1.30, 1.29): " KUBERNETES_VERSION < /dev/tty
+KUBERNETES_VERSION=${KUBERNETES_VERSION:-$DEFAULT_K8S_VERSION}
+
 echo "Starting SDV Ansible setup on the local machine..."
 
 # 1. Install Ansible and its dependencies
@@ -27,11 +37,6 @@ echo "Downloading the SDV Ansible project..."
 
 # 3. Execute the site.yml playbook locally
 echo "Executing the setup playbook..."
-# Pass variables from interactive prompts to Ansible
-read -p "Enter the private IP address of the Kube-apiserver endpoint: " KUBE_API_SERVER_IP
-DEFAULT_K8S_VERSION="1.31"
-read -p "Enter the Kubernetes version to install (default: ${DEFAULT_K8S_VERSION}, e.g., 1.30, 1.29): " KUBERNETES_VERSION
-KUBERNETES_VERSION=${KUBERNETES_VERSION:-$DEFAULT_K8S_VERSION}
 
 ansible-playbook site.yml -c local \
   -e "kube_api_server_ip=$KUBE_API_SERVER_IP" \
