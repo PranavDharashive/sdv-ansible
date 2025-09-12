@@ -38,8 +38,11 @@ echo "Downloading the SDV Ansible project..."
 # 3. Execute the site.yml playbook locally
 echo "Executing the setup playbook..."
 
-ansible-playbook site.yml -c local \
+if ansible-playbook site.yml -c local \
   -e "kube_api_server_ip=$KUBE_API_SERVER_IP" \
-  -e "kubernetes_version=$KUBERNETES_VERSION"
-
-echo "SDV Ansible setup completed. Check $LOG_FILE for details."
+  -e "kubernetes_version=$KUBERNETES_VERSION"; then
+    echo "SDV Ansible setup completed successfully. Check $LOG_FILE for details."
+else
+    echo "SDV Ansible setup failed. Check $LOG_FILE for details." >&2
+    exit 1
+fi
