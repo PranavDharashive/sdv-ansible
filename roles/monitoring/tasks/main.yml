@@ -47,12 +47,56 @@
     - Reload systemd
     - Start node_exporter
 
+- name: Create Node Exporter Service and Endpoints
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: v1
+      kind: Service
+      metadata:
+        labels:
+          app.kubernetes.io/name: node-exporter
+          app.kubernetes.io/instance: node-exporter
+        name: node-exporter
+        namespace: monitoring
+      spec:
+        ports:
+        - name: http-metrics
+          port: 9100
+          protocol: TCP
+          targetPort: 9100
+        selector:
+          app.kubernetes.io/name: node-exporter
+      type: ClusterIP
+---
+      apiVersion: v1
+      kind: Endpoints
+      metadata:
+        labels:
+          app.kubernetes.io/name: node-exporter
+          app.kubernetes.io/instance: node-exporter
+        name: node-exporter
+        namespace: monitoring
+      subsets:
+        - addresses:
+            - ip: "{{ ansible_default_ipv4.address }}" # Use the host's IP address
+          ports:
+            - name: http-metrics
+              port: 9100
+              protocol: TCP
+
 - name: Create monitoring namespace
   kubernetes.core.k8s:
     name: monitoring
     api_version: v1
     kind: Namespace
     state: present
+
+- name: Deploy Kube-state-metrics
+  kubernetes.core.k8s:
+    state: present
+    src: https://raw.githubusercontent.com/kubernetes/kube-state-metrics/master/examples/standard/kube-state-metrics-deployment.yaml
+    namespace: monitoring
 
 - name: Deploy Prometheus Operator CRDs
   kubernetes.core.k8s:
@@ -86,6 +130,27 @@
     src: https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/master/example/prometheus-operator-deployment.yaml
     namespace: monitoring
 
+- name: Deploy ServiceMonitor for Node Exporter
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: monitoring.coreos.com/v1
+      kind: ServiceMonitor
+      metadata:
+        labels:
+          app.kubernetes.io/name: node-exporter
+          app.kubernetes.io/instance: node-exporter
+        name: node-exporter
+        namespace: monitoring
+      spec:
+        endpoints:
+        - port: http-metrics
+          interval: 30s
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: node-exporter
+            app.kubernetes.io/instance: node-exporter
+
 - name: Deploy Prometheus instance
   kubernetes.core.k8s:
     state: present
@@ -104,6 +169,76 @@
   loop:
     - https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/manifests/grafana-deployment.yaml
     - https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/main/manifests/grafana-service.yaml
+
+- name: Patch Grafana service to use NodePort
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: grafana
+        namespace: monitoring
+      spec:
+        type: NodePort
+        ports:
+          - port: 3000
+            targetPort: 3000
+            nodePort: 30000
+
+- name: Patch Prometheus service to use NodePort
+  kubernetes.core.k8s:
+    state: present
+    definition: |
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: prometheus-example-app
+        namespace: monitoring
+      spec:
+        type: NodePort
+        ports:
+          - port: 9090
+            targetPort: 9090
+            nodePort: 30090
+
+- name: Create Grafana Kubernetes Dashboard ConfigMap
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: grafana-kubernetes-dashboard
+        namespace: monitoring
+        labels:
+          grafana_dashboard: "1"
+      data:
+        kubernetes-cluster-overview.json: |
+          {{ lookup('file', '15661_rev2.json') | to_nice_json }}
+
+- name: Patch Grafana deployment to provision Kubernetes dashboard
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: grafana
+        namespace: monitoring
+      spec:
+        template:
+          spec:
+            volumes:
+              - name: grafana-dashboards
+                configMap:
+                  name: grafana-kubernetes-dashboard
+            containers:
+              - name: grafana
+                volumeMounts:
+                  - name: grafana-dashboards
+                    mountPath: /etc/grafana/provisioning/dashboards/kubernetes-cluster-overview.json
+                    subPath: kubernetes-cluster-overview.json
 
 - name: Verify Node Exporter service status
   ansible.builtin.systemd_service:

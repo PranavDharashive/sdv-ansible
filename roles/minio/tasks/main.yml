@@ -97,10 +97,18 @@
       spec:
         selector:
           app: minio
+        type: NodePort # Explicitly set type to NodePort here
         ports:
-          - protocol: TCP
+          - name: api
+            protocol: TCP
             port: 9000
             targetPort: 9000
+            nodePort: 30090
+          - name: console
+            protocol: TCP
+            port: 9001
+            targetPort: 9001
+            nodePort: 30091
 
 - name: Verify MinIO pod is running
   kubernetes.core.k8s_info:

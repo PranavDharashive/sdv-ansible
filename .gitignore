@@ -1,0 +1,23 @@
+# Logs
+*.log
+sdv_ansible_run_*.log
+sdv_ansible_cleanup_*.log
+
+# Temporary files
+*~
+*.tmp
+.DS_Store
+
+# Python bytecode
+*.pyc
+__pycache__/
+
+# Virtual environment
+.venv/
+venv/
+
+# Sensitive files (if any)
+*.vault
+
+# Gemini specific
+GEMINI.md

@@ -10,3 +10,4 @@
     - mysql
     - sdv_apps
     - minio
+    - haproxy

@@ -1,0 +1,84 @@
+---
+- name: Install HAProxy
+  ansible.builtin.apt:
+    name: haproxy
+    state: present
+
+- name: Create dummy SSL certificate for HAProxy
+  ansible.builtin.command: openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/certs/haproxy.pem -out /etc/ssl/certs/haproxy.pem -subj "/CN=localhost"
+  args:
+    creates: /etc/ssl/certs/haproxy.pem
+
+- name: Configure HAProxy
+  ansible.builtin.copy:
+    content: |
+      global
+          log /dev/log    daemon
+          chroot /var/lib/haproxy
+          stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+          stats timeout 30s
+          user haproxy
+          group haproxy
+          daemon
+
+      defaults
+          log     global
+          mode    http
+          option  httplog
+          option  dontlognull
+          timeout connect 5000ms
+          timeout client  50000ms
+          timeout server  50000ms
+
+      frontend http_front
+          bind *:80
+          bind *:443 ssl crt /etc/ssl/certs/haproxy.pem # Assuming you have a cert
+          mode http
+          log global
+
+          # ACLs for path-based routing
+          acl is_minio path_beg /minio
+          acl is_grafana path_beg /grafana
+          acl is_prometheus path_beg /prometheus
+          acl is_minio_console path_beg /minio-console # New ACL
+
+          # Use backend based on ACLs
+          use_backend minio_backend if is_minio
+          use_backend grafana_backend if is_grafana
+          use_backend prometheus_backend if is_prometheus
+          use_backend minio_console_backend if is_minio_console # New use_backend
+          default_backend web_app_backend
+
+      backend web_app_backend
+          mode http
+          balance roundrobin
+          server web_app {{ ansible_default_ipv4.address }}:30080 check
+
+      backend minio_backend
+          mode http
+          balance roundrobin
+          server minio_server {{ ansible_default_ipv4.address }}:30090 check
+
+      backend grafana_backend
+          mode http
+          balance roundrobin
+          server grafana_server {{ ansible_default_ipv4.address }}:30000 check
+
+      backend prometheus_backend
+          mode http
+          balance roundrobin
+          server prometheus_server {{ ansible_default_ipv4.address }}:30090 check
+
+      backend minio_console_backend # New backend
+          mode http
+          balance roundrobin
+          server minio_console_server {{ ansible_default_ipv4.address }}:30091 check
+    dest: /etc/haproxy/haproxy.cfg
+    mode: '0644'
+  notify: Restart haproxy
+
+- name: Enable and start HAProxy service
+  ansible.builtin.systemd:
+    name: haproxy
+    state: started
+    enabled: yes
