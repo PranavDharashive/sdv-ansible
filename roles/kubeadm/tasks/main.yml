@@ -103,10 +103,11 @@
     state: present
 
 - name: Enable CRI plugin in containerd
-  ansible.builtin.replace:
+  ansible.builtin.lineinfile:
     path: /etc/containerd/config.toml
-    regexp: 'disabled_plugins = ["cri"]'
-    replace: 'disabled_plugins = []'
+    regexp: '^(disabled_plugins = ."cri".*)'
+    line: '# \1'
+    backrefs: yes
   notify: Restart containerd
 
 - name: Add Kubernetes GPG key
