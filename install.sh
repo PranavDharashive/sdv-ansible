@@ -17,6 +17,20 @@ DEFAULT_K8S_VERSION="1.31"
 read -p "Enter the Kubernetes version to install (default: ${DEFAULT_K8S_VERSION}, e.g., 1.30, 1.29): " KUBERNETES_VERSION < /dev/tty
 KUBERNETES_VERSION=${KUBERNETES_VERSION:-$DEFAULT_K8S_VERSION}
 
+# Check if a different version of Kubernetes is already installed
+if command -v kubeadm &> /dev/null; then
+    INSTALLED_KUBE_VERSION=$(kubeadm version -o short | sed 's/v//')
+    if [[ ! "$INSTALLED_KUBE_VERSION" == "$KUBERNETES_VERSION"* ]]; then
+        echo "Warning: An existing Kubernetes installation (version $INSTALLED_KUBE_VERSION) was found, but you are trying to install version $KUBERNETES_VERSION."
+        read -p "It is highly recommended to run the cleanup.sh script first to avoid conflicts. Continue anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Aborting. Please run ./cleanup.sh to remove the existing installation."
+            exit 1
+        fi
+    fi
+fi
+
 echo "Starting SDV Ansible setup on the local machine..."
 
 # 1. Install Ansible and its dependencies
